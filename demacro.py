@@ -62,14 +62,12 @@ if __name__ == "__main__":
 	multilineFlag = 0
 
 	for line in contents:
-
-		print multilineFlag
+		
 		if multilineFlag:
 			multilineMatch = re.search(r"([^%\n]*)", line)
 			if not multilineMatch:
 				continue
 			current = current + multilineMatch.group(0)
-			print current
 			count_left = len(re.findall('{', current))
 			count_right = len(re.findall('}', current))
 			if count_left == count_right:
