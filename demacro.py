@@ -53,50 +53,79 @@ if __name__ == "__main__":
 			contents.append(line)
 	inputHandler.close()
 
-	newcPat = re.compile( r"^\s*\\newcommand\*?\s*{?\s*\\([A-Za-z0-9]*)\s*}?\s*([^\%^\n]*)")
-	renewcPat = re.compile( r"^\s*\\renewcommand\*?\s*{?\s*\\([A-Za-z0-9]*)\s*}?\s*([^\%^\n]*)")
-	defPat = re.compile( r"^\s*\\def\s*{?\s*\\([A-Za-z0-9]*)\s*}?\s*(([{\[]?\#\d[}\]]?)*){([^\%^\n]*)}" )
+	newcPat = re.compile( r"^\s*\\newcommand\*?\s*{?\s*\\([A-Za-z0-9]*)\s*}?\s*([^%\n]*)")
+	renewcPat = re.compile( r"^\s*\\renewcommand\*?\s*{?\s*\\([A-Za-z0-9]*)\s*}?\s*([^%\n]*)")
+	defPat = re.compile( r"^\s*\\def\s*{?\s*\\([A-Za-z0-9]*)\s*}?\s*(([{\[]?\#\d[}\]]?)*){([^%\n]*)}" )
 	mathPat = re.compile( r"\\DeclareMathOperator\*?{?\\([A-Za-z]*)}?{((:?[^{}]*{[^}]*})*[^}]*)}" )
 	commandDict = {}
 	mathDict = {}
+	multilineFlag = 0
 
 	for line in contents:
 
-		current = line
+		print multilineFlag
+		if multilineFlag:
+			multilineMatch = re.search(r"([^%\n]*)", line)
+			if not multilineMatch:
+				continue
+			current = current + multilineMatch.group(0)
+			print current
+			count_left = len(re.findall('{', current))
+			count_right = len(re.findall('}', current))
+			if count_left == count_right:
+				multilineFlag = 0
+			else:
+				continue
+		else:
+			current = line
 
-		newcMatch = newcPat.search(line)
+		newcMatch = newcPat.search(current)
 		if newcMatch:
-			if not re.search(r"@", line):
-				multipleArg = re.search(r"^(\[(\d)\])?(.*){((:?[^{}]*{[^}]*})*[^}]*)}", newcMatch.group(2))
-				if multipleArg.group(1):
-					commandDict[newcMatch.group(1)] = [multipleArg.group(4), int(multipleArg.group(2))]
-				else:
-					commandDict[newcMatch.group(1)] = [multipleArg.group(4), 0]
-			current = re.sub(newcPat, "", line)
-
-		renewcMatch = renewcPat.search(line)
-		if renewcMatch:
-			if not re.search(r"@", line):
-				if len(re.findall('{', renewcMatch.group(2)))==0:
-					commandDict[renewcMatch.group(1)] = [renewcMatch.group(2), 0]
-				else:
-					multipleArg = re.search(r"^(\[(\d)\])?(.*){((:?[^{}]*{[^}]*})*[^}]*)}", renewcMatch.group(2))
+			count_left = len(re.findall('{', newcMatch.group(2)))
+			count_right = len(re.findall('}', newcMatch.group(2)))
+			if count_left == count_right:
+				if not re.search(r"@", current):
+					multipleArg = re.search(r"^(\[(\d)\])?(.*){((:?[^{}]*{[^}]*})*[^}]*)}", newcMatch.group(2))
 					if multipleArg.group(1):
-						commandDict[renewcMatch.group(1)] = [multipleArg.group(4), int(multipleArg.group(2))]
+						commandDict[newcMatch.group(1)] = [multipleArg.group(4), int(multipleArg.group(2))]
 					else:
-						commandDict[renewcMatch.group(1)] = [multipleArg.group(4), 0]
-			current = re.sub(renewcPat, "", line)
+						commandDict[newcMatch.group(1)] = [multipleArg.group(4), 0]
+				current = re.sub(newcPat, "", current)
+			else:
+				multilineFlag = 1
+				current = newcMatch.group(0)
+				continue
 
-		defMatch = defPat.search(line)
+		renewcMatch = renewcPat.search(current)
+		if renewcMatch:
+			count_left = len(re.findall('{', renewcMatch.group(2)))
+			count_right = len(re.findall('}', renewcMatch.group(2)))
+			if count_left == count_right:
+				if not re.search(r"@", current):
+					if len(re.findall('{', renewcMatch.group(2)))==0:
+						commandDict[renewcMatch.group(1)] = [renewcMatch.group(2), 0]
+					else:
+						multipleArg = re.search(r"^(\[(\d)\])?(.*){((:?[^{}]*{[^}]*})*[^}]*)}", renewcMatch.group(2))
+						if multipleArg.group(1):
+							commandDict[renewcMatch.group(1)] = [multipleArg.group(4), int(multipleArg.group(2))]
+						else:
+							commandDict[renewcMatch.group(1)] = [multipleArg.group(4), 0]
+				current = re.sub(renewcPat, "", current)
+			else:
+				multilineFlag = 1
+				current = renewcMatch.group(0)
+				continue
+
+		defMatch = defPat.search(current)
 		if defMatch:
-			if not re.search(r"@", line):
+			if not re.search(r"@", current):
 				commandDict[defMatch.group(1)] = [defMatch.group(4), len(re.findall(r"#",defMatch.group(2)))]
-			current = re.sub(defPat, "", line)
+			current = re.sub(defPat, "", current)
 
-		mathMatch = mathPat.search(line)
+		mathMatch = mathPat.search(current)
 		if mathMatch:
 			mathDict[mathMatch.group(1)] = mathMatch.group(2)
-			current = re.sub(mathPat, "", line)
+			current = re.sub(mathPat, "", current)
 
 		for x in commandDict:
 			if re.search(r"\\" + x + "(?![A-Za-z0-9])", current):
