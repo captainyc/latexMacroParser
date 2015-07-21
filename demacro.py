@@ -62,7 +62,7 @@ if __name__ == "__main__":
 	multilineFlag = 0
 
 	for line in contents:
-		
+
 		if multilineFlag:
 			multilineMatch = re.search(r"([^%\n]*)", line)
 			if not multilineMatch:
@@ -142,7 +142,8 @@ if __name__ == "__main__":
 					while match:
 						definition = commandDict[x][0]
 						for i in range(0,commandDict[x][1]):
-							definition = re.sub(r"#"+str(i+1), match.group(i*2+2), definition)
+							# definition = re.sub(r"#"+str(i+1), match.group(i*2+2), definition)
+							definition = definition.replace(r"#"+str(i+1),match.group(i*2+2))
 						current = match.group(1) + definition + match.group(commandDict[x][1]*2+2)
 						match = re.search(pat, current)
 				current = current+'\n'
