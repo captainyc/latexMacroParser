@@ -6,4 +6,5 @@ This code expands the following macros in laTeX source files:
   - \DeclareMathOperator
 
 Usage:
-  demacro <inputfile.tex> <outputfile.tex>
+
+  demacro inputfile.tex outputfile.tex
