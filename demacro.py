@@ -125,7 +125,12 @@ if __name__ == "__main__":
 			mathDict[mathMatch.group(1)] = mathMatch.group(2)
 			current = re.sub(mathPat, "", current)
 
-		for x in commandDict:
+		candidate = set(re.findall(r"\\([A-Za-z0-9]*)", current))
+		#print candidate
+		print list(set(commandDict) & candidate)
+		print list(set(mathDict) & candidate)
+		for x in list(set(commandDict) & candidate):
+
 			if re.search(r"\\" + x + "(?![A-Za-z0-9])", current):
 				if (commandDict[x][1]==0):
 					#current = re.sub(r"\\" + x + "(?![A-Za-z0-9])", commandDict[x][0], current)
@@ -147,8 +152,7 @@ if __name__ == "__main__":
 						current = match.group(1) + definition + match.group(commandDict[x][1]*2+2)
 						match = re.search(pat, current)
 				current = current+'\n'
-
-		for x in mathDict:
+		for x in list(set(mathDict) & candidate):
 			#current = re.sub(r"\\" + x + "(?![A-Za-z0-9])", '\\operatorname{' + mathDict[x] + '}', current)
 			#current = current.replace("\\" + x, "\\operatorname{" + mathDict[x] + "}")
 			match = re.search(r"^(.*)\\" + x + "(?![A-Za-z0-9])(.*)", current)
@@ -157,6 +161,7 @@ if __name__ == "__main__":
 					current = match.group(1) + '\\operatorname{' + mathDict[x] + '}' + match.group(2)
 					match = re.search(r"^(.*)\\" + x + "(?![A-Za-z0-9])(.*)", current)
 				current = current + '\n'
+
 		
 		outputHandler.write(current)
 
