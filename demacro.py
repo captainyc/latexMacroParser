@@ -126,9 +126,9 @@ if __name__ == "__main__":
 			current = re.sub(mathPat, "", current)
 
 		candidate = set(re.findall(r"\\([A-Za-z0-9]*)", current))
-		#print candidate
-		print list(set(commandDict) & candidate)
-		print list(set(mathDict) & candidate)
+		# print candidate
+		# print list(set(commandDict) & candidate)
+		# print list(set(mathDict) & candidate)
 		for x in list(set(commandDict) & candidate):
 
 			if re.search(r"\\" + x + "(?![A-Za-z0-9])", current):
