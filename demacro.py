@@ -49,21 +49,19 @@ def main():
 			contents.append(line)
 	inputHandler.close()
 
-
 	temp = []
 	for line in contents:
 		macros = re.findall(r"\\newcommand|\\renewcommand|\\def", line)
 		if len(macros) <= 1:
 			temp.append(line)
 		else:
-			pat = "(.*)\\"+"(.*)\\".join(macros)+"([^\n]*)" 
-			match = re.search(pat, line)
-			if match.group(1):
-				temp.append(match.group(1))
+			definitions = re.split(r"\\newcommand|\\renewcommand|\\def", line)
+			if definitions[0]:
+				temp.append(definitions[0])
 			for i in range(0,len(macros)):
-				if re.search(r"%",match.group(i+1)):
+				if re.search(r"%",definitions[i]):
 					break
-				temp.append(macros[i]+match.group(i+2))
+				temp.append(macros[i]+definitions[i+1])
 	contents = temp
 
 	# Define patterns, dictionaries
@@ -80,7 +78,7 @@ def main():
 
 	for line in contents:
 
-		#print line 
+		# print line 
 		#print multilineFlag
 
 		if multilineFlag:
