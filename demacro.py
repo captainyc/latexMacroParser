@@ -1,41 +1,37 @@
 #!/usr/bin/python -O
 """
 Parse macros in LaTeX source code. Supported macros include:
-    - newcommand/renewcommand(*)
-        Support various syntax, multiple-line definition, multiple arguments
-        Do not support optional arguments
-    - DeclareMathOperator(*)
-    - def
-    - input
-        Combine all the input files into one
+	- newcommand/renewcommand(*)
+	- DeclareMathOperator(*)
+	- def
+	- input
 
 Usage:
-    demacro.py <inputfile.tex> <outputfile.tex>
+	demacro.py <inputfile.tex> <outputfile.tex>
 
 """
 
 def cut_extension(filename, ext):
-    """
-    If filename has extension ext (including the possible dot),
-    it will be cut off.
-    """
-    file = filename
-    index = filename.rfind(ext)
-    if 0 <= index and len(file)-len(ext) == index:
-        file = file[:index]
-    return file
+	file = filename
+	index = filename.rfind(ext)
+	if 0 <= index and len(file)-len(ext) == index:
+		file = file[:index]
+	return file
 
 import sys
 import re
 import os
+import multiprocessing
+import time
 
-if __name__ == "__main__":
+
+def main():
 
 	inputHandler = open(sys.argv[1], 'r')
 	outputHandler = open(sys.argv[2], "w")
-#	outputSty = open('temp.sty', "w")
 	contents = []
 
+	# Expand \input{} files
 	for line in inputHandler:
 		match = re.search(r"(.*)\\input{[./]*(.*?)}(.*)", line)
 		if match:
@@ -53,13 +49,33 @@ if __name__ == "__main__":
 			contents.append(line)
 	inputHandler.close()
 
-	newcPat = re.compile( r"^\s*\\newcommand\*?\s*{?\s*\\([A-Za-z0-9]*)\s*}?\s*([^%\n]*)")
-	renewcPat = re.compile( r"^\s*\\renewcommand\*?\s*{?\s*\\([A-Za-z0-9]*)\s*}?\s*([^%\n]*)")
-	defPat = re.compile( r"^\s*\\def\s*{?\s*\\([A-Za-z0-9]*)\s*}?\s*(([{\[]?\#\d[}\]]?)*){([^%\n]*)}" )
+
+	temp = []
+	for line in contents:
+		macros = re.findall(r"\\newcommand|\\renewcommand|\\def", line)
+		if len(macros) <= 1:
+			temp.append(line)
+		else:
+			pat = "(.*)\\"+"(.*)\\".join(macros)+"([^\n]*)" 
+			match = re.search(pat, line)
+			if match.group(1):
+				temp.append(match.group(1))
+			for i in range(0,len(macros)):
+				if re.search(r"%",match.group(i+1)):
+					break
+				temp.append(macros[i]+match.group(i+2))
+	contents = temp
+
+	# Define patterns, dictionaries
+	newcPat = re.compile( r"^\s*\\newcommand\*?\s*{?\s*\\([<>|]?[A-Za-z0-9]*)\s*}?\s*([^%\n]*)")
+	renewcPat = re.compile( r"^\s*\\renewcommand\*?\s*{?\s*\\([<>|]?[A-Za-z0-9]*)\s*}?\s*([^%\n]*)")
+	defPat = re.compile( r"^\s*\\def\s*{?\s*\\([<>|]?[A-Za-z0-9]*)\s*}?\s*(\[?#\d\]?)*\s*([^%\n]*)" )
 	mathPat = re.compile( r"\\DeclareMathOperator\*?{?\\([A-Za-z]*)}?{((:?[^{}]*{[^}]*})*[^}]*)}" )
 	commandDict = {}
 	mathDict = {}
-	multilineFlag = 0
+	warningFlag = 0
+	multilineFlag = 0		# For definitions extended to several lines
+
 
 	for line in contents:
 
@@ -77,60 +93,112 @@ if __name__ == "__main__":
 		else:
 			current = line
 
+		if  len(re.findall(r"\\newcommand|\\renewcommand|\\def", current)) > 1:
+			#if warningFlag == 0:
+			if False:
+				print "Warning: possible recursive definitions not expanded."
+				warningFlag = 1
+			outputHandler.write(current)
+			continue
+
+		# Parse \newcommand
 		newcMatch = newcPat.search(current)
 		if newcMatch:
-			count_left = len(re.findall('{', newcMatch.group(2)))
-			count_right = len(re.findall('}', newcMatch.group(2)))
+			count_left = len(re.findall('{', newcMatch.group(2))) - len(re.findall(r'\\{', newcMatch.group(2)))
+			count_right = len(re.findall('}', newcMatch.group(2))) - len(re.findall(r'\\}', newcMatch.group(2)))
 			if count_left == count_right:
 				if not re.search(r"@", current):
-					multipleArg = re.search(r"^(\[(\d)\])?(.*){((:?[^{}]*{[^}]*})*[^}]*)}", newcMatch.group(2))
-					if multipleArg.group(1):
-						commandDict[newcMatch.group(1)] = [multipleArg.group(4), int(multipleArg.group(2))]
+					if len(re.findall('{', newcMatch.group(2)))==0:
+						commandDict[newcMatch.group(1)] = [newcMatch.group(2), 0]
 					else:
-						commandDict[newcMatch.group(1)] = [multipleArg.group(4), 0]
-				current = re.sub(newcPat, "", current)
-			else:
+						# multipleArg = re.search(r"^(\[(\d)\])?(.*){((:?[^{}]*{[^}]*})*[^}]*)}", newcMatch.group(2))
+						multipleArg = re.search(r"^(\[(\d)\])?([^{]*){(.*)}", newcMatch.group(2))
+						if multipleArg:
+							if multipleArg.group(1):
+								commandDict[newcMatch.group(1)] = [multipleArg.group(4), int(multipleArg.group(2))]
+							else:
+								commandDict[newcMatch.group(1)] = [multipleArg.group(4), 0]
+						else:
+							multilineFlag = 1
+							current = newcMatch.group(0)
+							continue
+					current = re.sub(newcPat, "", current)
+			elif count_left > count_right:
 				multilineFlag = 1
 				current = newcMatch.group(0)
 				continue
+			else:
+				outputHandler.write(current)
+				continue
 
+		# Parse \renewcommand
 		renewcMatch = renewcPat.search(current)
 		if renewcMatch:
-			count_left = len(re.findall('{', renewcMatch.group(2)))
-			count_right = len(re.findall('}', renewcMatch.group(2)))
+			count_left = len(re.findall('{', renewcMatch.group(2))) - len(re.findall(r'\\{', renewcMatch.group(2)))
+			count_right = len(re.findall('}', renewcMatch.group(2))) - len(re.findall(r'\\}', renewcMatch.group(2)))
 			if count_left == count_right:
 				if not re.search(r"@", current):
 					if len(re.findall('{', renewcMatch.group(2)))==0:
 						commandDict[renewcMatch.group(1)] = [renewcMatch.group(2), 0]
 					else:
-						multipleArg = re.search(r"^(\[(\d)\])?(.*){((:?[^{}]*{[^}]*})*[^}]*)}", renewcMatch.group(2))
-						if multipleArg.group(1):
-							commandDict[renewcMatch.group(1)] = [multipleArg.group(4), int(multipleArg.group(2))]
+						# multipleArg = re.search(r"^(\[(\d)\])?(.*){((:?[^{}]*{[^}]*})*[^}]*)}", renewcMatch.group(2))
+						multipleArg = re.search(r"^(\[(\d)\])?([^{]*){(.*)}", renewcMatch.group(2))
+						if multipleArg:
+							if multipleArg.group(1):
+								commandDict[renewcMatch.group(1)] = [multipleArg.group(4), int(multipleArg.group(2))]
+							else:
+								commandDict[renewcMatch.group(1)] = [multipleArg.group(4), 0]
 						else:
-							commandDict[renewcMatch.group(1)] = [multipleArg.group(4), 0]
-				current = re.sub(renewcPat, "", current)
-			else:
+							multilineFlag = 1
+							current = newcMatch.group(0)
+							continue
+					current = re.sub(renewcPat, "", current)
+			elif count_left > count_right:
 				multilineFlag = 1
 				current = renewcMatch.group(0)
 				continue
+			else:
+				outputHandler.write(current)
+				continue
 
+		# Parse \def
 		defMatch = defPat.search(current)
 		if defMatch:
-			if not re.search(r"@", current):
-				commandDict[defMatch.group(1)] = [defMatch.group(4), len(re.findall(r"#",defMatch.group(2)))]
-			current = re.sub(defPat, "", current)
+			count_left = len(re.findall('{', defMatch.group(3))) - len(re.findall(r'\\{', defMatch.group(3)))
+			count_right = len(re.findall('}', defMatch.group(3))) - len(re.findall(r'\\}', defMatch.group(3)))
+			if count_left == count_right:
+				defContent = re.search(r"^{(.*)}$", defMatch.group(3))
+				if defContent:
+					defContent = defContent.group(1)
+				else:
+					defContent = defMatch.group(3)
+				if not re.search(r"@", current):
+					if defMatch.group(2):
+						commandDict[defMatch.group(1)] = [defContent, len(re.findall(r"#",defMatch.group(2)))]
+					else:
+						commandDict[defMatch.group(1)] = [defContent, 0]
+					current = re.sub(defPat, "", current)
+			elif count_left > count_right:
+				multilineFlag = 1
+				current = defMatch.group(0)
+				continue
+			else:
+				outputHandler.write(current)
+				continue
 
+
+		# Parse \DeclareMathOperator
 		mathMatch = mathPat.search(current)
 		if mathMatch:
 			mathDict[mathMatch.group(1)] = mathMatch.group(2)
 			current = re.sub(mathPat, "", current)
 
-		candidate = set(re.findall(r"\\([A-Za-z0-9]*)", current))
+
+		candidate = set(re.findall(r"\\([A-Za-z0-9]*)", current))		# Possible commands in the current line to be parsed
 		# print candidate
 		# print list(set(commandDict) & candidate)
 		# print list(set(mathDict) & candidate)
 		for x in list(set(commandDict) & candidate):
-
 			if re.search(r"\\" + x + "(?![A-Za-z0-9])", current):
 				if (commandDict[x][1]==0):
 					#current = re.sub(r"\\" + x + "(?![A-Za-z0-9])", commandDict[x][0], current)
@@ -152,6 +220,7 @@ if __name__ == "__main__":
 						current = match.group(1) + definition + match.group(commandDict[x][1]*2+2)
 						match = re.search(pat, current)
 				current = current+'\n'
+
 		for x in list(set(mathDict) & candidate):
 			#current = re.sub(r"\\" + x + "(?![A-Za-z0-9])", '\\operatorname{' + mathDict[x] + '}', current)
 			#current = current.replace("\\" + x, "\\operatorname{" + mathDict[x] + "}")
@@ -162,7 +231,25 @@ if __name__ == "__main__":
 					match = re.search(r"^(.*)\\" + x + "(?![A-Za-z0-9])(.*)", current)
 				current = current + '\n'
 
-		
 		outputHandler.write(current)
 
 	outputHandler.close()
+
+
+if __name__ == "__main__":
+
+	# main()
+	# Start main as a process
+	p = multiprocessing.Process(target=main)
+	p.start()
+
+	# Wait for 600 seconds or until process finishes
+	killTime = 300
+	p.join(killTime)
+
+	# If thread is still active
+	if p.is_alive():
+		print "Killing process after %d seconds" %killTime
+		# Terminate
+		p.terminate()
+		p.join()
