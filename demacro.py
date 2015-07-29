@@ -17,7 +17,6 @@ import os
 import multiprocessing
 import time
 
-
 def cut_extension(filename, ext):
 	file = filename
 	index = filename.rfind(ext)
@@ -350,10 +349,10 @@ def main():
 			continue
 		elif newmacro.defined:
 			macroDict[newmacro.name] = newmacro
-			#print current
-			#print newmacro.name
-			#print newmacro.definition
-			#print newmacro.narg
+			print current
+			print newmacro.name
+			print newmacro.definition
+			print newmacro.narg
 		else:
 			outputHandler.write(current)
 
