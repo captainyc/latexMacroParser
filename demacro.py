@@ -16,6 +16,7 @@ import re
 import os
 import multiprocessing
 import time
+import argparse
 
 def cut_extension(filename, ext):
 	file = filename
@@ -306,9 +307,21 @@ def expand_input(argv):
 
 def main():
 
-	contents = expand_input(sys.argv[1])
+        parser   = argparse.ArgumentParser(description='expands LaTeX macros')
 
-	outputHandler = open(sys.argv[2], "w")
+        # required
+        parser.add_argument('inputFile',  help='name of input file to de-macro')
+        parser.add_argument('outputFile', help='name of output file to write')
+
+        # optional
+        parser.add_argument('-f', '--fileList' , action='store_true', help='indicates that inputFile is a file list')
+        parser.add_argument('-d', '--directory', action='store_true', help='indicates that inputFile is a directory of tarballs')
+
+        args     = parser.parse_args()
+        
+	contents      = expand_input(args.inputFile)
+	outputHandler = open(args.outputFile, "w")
+
 	macroDict = {}
 	multilineFlag = False
 
