@@ -17,6 +17,9 @@ import os
 import multiprocessing
 import time
 import argparse
+import glob
+import tarfile
+from itertools import repeat
 
 def cut_extension(filename, ext):
 	file = filename
@@ -305,72 +308,128 @@ def expand_input(argv):
 	contents = temp
 	return contents
 
+def demacro(input, output, verbose):
+
+        contents      = expand_input(input)
+        outputHandler = open(output, "w")
+
+        macroDict = {}
+        multilineFlag = False
+
+        for line in contents:
+
+                #print line
+                #print multilineFlag
+
+                if re.search(r"^%",line):
+                        outputHandler.write(line)
+                        continue
+
+                if multilineFlag:
+                        current = re.search(r"^([^%\n]*)",current).group() + ' ' + line
+                        multilineFlag = False
+                else:
+                        current = line
+
+                #print current
+
+                candidate = set(re.findall(r"\\(\W|[A-Za-z0-9]+)", current))
+                for x in list(set(macroDict) & candidate):
+                        if verbose:
+                                print 'Demacro  -----------'
+                                print x
+                                print macroDict[x].definition
+                                print macroDict[x].narg
+                                print macroDict[x].default
+                                print '-----------'
+                        currentParsed = macroDict[x].parse(current)
+                        multilineFlag = currentParsed[1]
+                        if multilineFlag:
+                                break
+                        current = currentParsed[0]
+                        if verbose:
+                                print "parsed: {}".format(current)
+                        if multilineFlag:
+                                continue
+
+                newmacro = macro(current)
+                multilineFlag = newmacro.multiline
+                if multilineFlag:
+                        continue
+                elif newmacro.defined:
+                        macroDict[newmacro.name] = newmacro
+                        if verbose:
+                                print 'New Macro -----------'
+                                print current
+                                print newmacro.name
+                                print newmacro.definition
+                                print newmacro.narg
+                                print '-----------'
+
+                else:
+                        outputHandler.write(current)
+
+        outputHandler.close()
+        return
+
+def gunzip_and_demacro((tarball, outDir, verbose)):
+        # extract files from tarball
+        #print "extracting tarball"
+        tar = tarfile.open(tarball)
+        tar.extractall(outDir)
+
+        # find main file
+        inputFile = 'None'
+        for file in filter(lambda x: '.tex' in x, tar.getnames()):
+                fh = open(file, 'r')
+                for line in fh:
+                        if re.search('begin{document}', line):
+                                inputFile = file
+                                fh.close()
+                                break
+                fh.close()
+
+        if inputFile == 'None':
+                print 'no main file found for ' + tarball
+                tar.close()
+                return
+
+        tar.close()
+        outputFile = tarball.replace('.tar.gz', '') + '.tex'
+        
+        #print "input = {}, output = {}".format(inputFile, outputFile)
+        
+        # change current directory so rest of code works (fix?)
+        os.chdir(os.path.dirname(os.path.realpath(inputFile)))
+        demacro(os.path.basename(inputFile), outputFile, verbose)
+        os.chdir(os.path.dirname(os.path.realpath(outputFile)))
+        return
+        
+
 def main():
 
         parser   = argparse.ArgumentParser(description='expands LaTeX macros')
 
         # required
-        parser.add_argument('inputFile',  help='name of input file to de-macro')
-        parser.add_argument('outputFile', help='name of output file to write')
+        parser.add_argument('inputName',  help='input file or directory')
+        parser.add_argument('outputName', help='output file or directory')
 
         # optional
-        parser.add_argument('-f', '--fileList' , action='store_true', help='indicates that inputFile is a file list')
-        parser.add_argument('-d', '--directory', action='store_true', help='indicates that inputFile is a directory of tarballs')
+        parser.add_argument('-d', '--directory', action='store_true', help='indicates that inputFile is a directory of tarballs and outputFile is a directory')
+        parser.add_argument('-v', '--verbose' , action='store_true', help='enable verbose mode')
 
         args     = parser.parse_args()
         
-	contents      = expand_input(args.inputFile)
-	outputHandler = open(args.outputFile, "w")
 
-	macroDict = {}
-	multilineFlag = False
+        # assume directory has tarballs
+        if args.directory:
+                tarballs = glob.glob(args.inputName + '/*.tar.gz')
+                pool     = multiprocessing.Pool(processes=4, maxtasksperchild=1)
+                pool.map(gunzip_and_demacro, zip(tarballs, repeat(args.outputName), repeat(args.verbose)))
+        else:
+                demacro(args.inputName, args.outputName, args.verbose)
 
-	for line in contents:
-
-		#print line
-		#print multilineFlag
-
-		if re.search(r"^%",line):
-			outputHandler.write(line)
-			continue
-
-		if multilineFlag:
-			current = re.search(r"^([^%\n]*)",current).group() + ' ' + line
-			multilineFlag = False
-		else:
-			current = line
-
-		#print current
-
-		candidate = set(re.findall(r"\\(\W|[A-Za-z0-9]+)", current))
-		for x in list(set(macroDict) & candidate):
-			#print x
-			#print macroDict[x].definition
-			#print macroDict[x].narg
-			#print macroDict[x].default
-			currentParsed = macroDict[x].parse(current)
-			multilineFlag = currentParsed[1]
-			if multilineFlag:
-				break
-			current = currentParsed[0]
-		if multilineFlag:
-			continue
-
-		newmacro = macro(current)
-		multilineFlag = newmacro.multiline
-		if multilineFlag:
-			continue
-		elif newmacro.defined:
-			macroDict[newmacro.name] = newmacro
-			print current
-			print newmacro.name
-			print newmacro.definition
-			print newmacro.narg
-		else:
-			outputHandler.write(current)
-
-	outputHandler.close()
-
+        return
 
 if __name__ == "__main__":
 
@@ -380,7 +439,7 @@ if __name__ == "__main__":
 	p.start()
 
 	# Wait for 300 seconds or until process finishes
-	killTime = 300
+	killTime = 1000
 	p.join(killTime)
 
 	# If thread is still active
