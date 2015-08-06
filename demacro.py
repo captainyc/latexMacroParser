@@ -20,6 +20,7 @@ import argparse
 import glob
 import tarfile
 from itertools import repeat
+import time
 
 def cut_extension(filename, ext):
 	file = filename
@@ -67,6 +68,7 @@ class macro:
 	def __init__(self, line):
 		self.defined = False
 		self.multiline = False
+                self.kill_me   = False
 		# check if macros are defined within macros
 		
 		# newcommand & renewcommand
@@ -238,11 +240,16 @@ class macro:
 		return temp
 
 	def parse(self, line):
+                KILL_TIME_SEC = 30
+                start_time    = time.time()
 		if self.check_already_defined(line):
 			return [line, False]
 		current = re.search(r"[^\n]*", line).group()
 		match = self.match(current)
 		while match:
+                        if time.time() - start_time > KILL_TIME_SEC:
+                                self.kill_me = True
+                                return [None, None]
 			if self.narg == 0:
 				current = match.group(1) + self.definition + match.group(2)
 			else:
@@ -284,6 +291,7 @@ def expand_input(argv):
 				pass
 			else:
 				inputPath = os.getcwd() + '/' + cut_extension(match.group(2),'.tex') + '.tex'
+                                #print "expand: " + inputPath
 				if os.path.exists(inputPath):
 					inputFile = open(inputPath, 'r')
 					contents = contents + inputFile.readlines()
@@ -308,7 +316,35 @@ def expand_input(argv):
 	contents = temp
 	return contents
 
+def graceful_kill(input, output):
+	inputHandler  = open(input, 'rU')
+        outputHandler = open(output, "w")
+        contents = []
+        # Expand \input{} files
+        for line in inputHandler:
+                match = re.search(r"(.*)\\input{[./]*(.*?)}(.*)", line)
+                if match:
+                        contents.append(match.group(1))
+                        if re.search(r"%", match.group(1)):
+                                pass
+                        else:
+                                inputPath = os.getcwd() + '/' + cut_extension(match.group(2),'.tex') + '.tex'
+                                if os.path.exists(inputPath):
+                                        inputFile = open(inputPath, 'r')
+                                        contents = contents + inputFile.readlines()
+                                        contents.append('\n')
+                                contents.append(match.group(3))
+                else:
+                        contents.append(line)
+        inputHandler.close()
+        for line in contents:
+                outputHandler.write(line)
+        outputHandler.close()
+
 def demacro(input, output, verbose):
+
+        KILL_TIME_SEC   = 30
+        start_time      = time.time()
 
         contents      = expand_input(input)
         outputHandler = open(output, "w")
@@ -318,8 +354,8 @@ def demacro(input, output, verbose):
 
         for line in contents:
 
-                #print line
-                #print multilineFlag
+                #print "line = {} ".format(line)
+                #print "multi = {} ".format(multilineFlag)
 
                 if re.search(r"^%",line):
                         outputHandler.write(line)
@@ -331,10 +367,17 @@ def demacro(input, output, verbose):
                 else:
                         current = line
 
-                #print current
+                #print "current = {}".format(current)
 
                 candidate = set(re.findall(r"\\(\W|[A-Za-z0-9]+)", current))
                 for x in list(set(macroDict) & candidate):
+
+                        if time.time()-start_time > KILL_TIME_SEC:
+                                print "timeout1: {}".format(output)
+                                outputHandler.close()
+                                graceful_kill(input, output)
+                                return
+
                         if verbose:
                                 print 'Demacro  -----------'
                                 print x
@@ -342,19 +385,30 @@ def demacro(input, output, verbose):
                                 print macroDict[x].narg
                                 print macroDict[x].default
                                 print '-----------'
+
                         currentParsed = macroDict[x].parse(current)
+
+                        if macroDict[x].kill_me:
+                                print "timeout2: {}".format(output)
+                                outputHandler.close()
+                                graceful_kill(input, output)
+                                return
+
                         multilineFlag = currentParsed[1]
+
                         if multilineFlag:
                                 break
+
                         current = currentParsed[0]
                         if verbose:
-                                print "parsed: {}".format(current)
-                        if multilineFlag:
-                                continue
+                                print "parsed: {}, multiline: {}".format(current, multilineFlag)
+                if multilineFlag:
+                        continue
 
                 newmacro = macro(current)
                 multilineFlag = newmacro.multiline
                 if multilineFlag:
+                        #print "multiline2: {}".format(multilineFlag)
                         continue
                 elif newmacro.defined:
                         macroDict[newmacro.name] = newmacro
@@ -367,14 +421,16 @@ def demacro(input, output, verbose):
                                 print '-----------'
 
                 else:
+                        #print "writing now = {}".format(current)
                         outputHandler.write(current)
 
         outputHandler.close()
         return
 
 def gunzip_and_demacro((tarball, outDir, verbose)):
+
         # extract files from tarball
-        #print "extracting tarball"
+        #print "extracting" + tarball
         tar = tarfile.open(tarball)
         tar.extractall(outDir)
 
@@ -424,7 +480,7 @@ def main():
         # assume directory has tarballs
         if args.directory:
                 tarballs = glob.glob(args.inputName + '/*.tar.gz')
-                pool     = multiprocessing.Pool(processes=4, maxtasksperchild=1)
+                pool     = multiprocessing.Pool(processes=4)
                 pool.map(gunzip_and_demacro, zip(tarballs, repeat(args.outputName), repeat(args.verbose)))
         else:
                 demacro(args.inputName, args.outputName, args.verbose)
@@ -432,42 +488,5 @@ def main():
         return
 
 if __name__ == "__main__":
+	main()
 
-	# main()
-	# Start main as a process
-	p = multiprocessing.Process(target=main)
-	p.start()
-
-	# Wait for 300 seconds or until process finishes
-	killTime = 1000
-	p.join(killTime)
-
-	# If thread is still active
-	if p.is_alive():
-		print "Killing process after %d seconds\nOutput file as it is" %killTime
-		# Terminate
-		p.terminate()
-		p.join()
-		inputHandler = open(sys.argv[1], 'rU')
-		outputHandler = open(sys.argv[2], "w")
-		contents = []
-		# Expand \input{} files
-		for line in inputHandler:
-			match = re.search(r"(.*)\\input{[./]*(.*?)}(.*)", line)
-			if match:
-				contents.append(match.group(1))
-				if re.search(r"%", match.group(1)):
-					pass
-				else:
-					inputPath = os.getcwd() + '/' + cut_extension(match.group(2),'.tex') + '.tex'
-					if os.path.exists(inputPath):
-						inputFile = open(inputPath, 'r')
-						contents = contents + inputFile.readlines()
-						contents.append('\n')
-					contents.append(match.group(3))
-			else:
-				contents.append(line)
-		inputHandler.close()
-		for line in contents:
-			outputHandler.write(line)
-		outputHandler.close()
