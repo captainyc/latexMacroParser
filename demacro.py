@@ -439,6 +439,7 @@ def gunzip_and_demacro((tarball, outDir, verbose)):
         for file in filter(lambda x: '.tex' in x, tar.getnames()):
                 fh = open(file, 'r')
                 for line in fh:
+                        ## TODO: ignore commented lines
                         if re.search('begin{document}', line):
                                 inputFile = file
                                 fh.close()
@@ -489,4 +490,5 @@ def main():
 
 if __name__ == "__main__":
 	main()
+
 
