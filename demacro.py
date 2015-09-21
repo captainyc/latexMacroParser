@@ -16,6 +16,11 @@ import re
 import os
 import multiprocessing
 import time
+import argparse
+import glob
+import tarfile
+from itertools import repeat
+import time
 
 def cut_extension(filename, ext):
 	file = filename
@@ -63,6 +68,7 @@ class macro:
 	def __init__(self, line):
 		self.defined = False
 		self.multiline = False
+                self.kill_me   = False
 		# check if macros are defined within macros
 		
 		# newcommand & renewcommand
@@ -234,11 +240,16 @@ class macro:
 		return temp
 
 	def parse(self, line):
+                KILL_TIME_SEC = 30
+                start_time    = time.time()
 		if self.check_already_defined(line):
 			return [line, False]
 		current = re.search(r"[^\n]*", line).group()
 		match = self.match(current)
 		while match:
+                        if time.time() - start_time > KILL_TIME_SEC:
+                                self.kill_me = True
+                                return [None, None]
 			if self.narg == 0:
 				current = match.group(1) + self.definition + match.group(2)
 			else:
@@ -280,6 +291,7 @@ def expand_input(argv):
 				pass
 			else:
 				inputPath = os.getcwd() + '/' + cut_extension(match.group(2),'.tex') + '.tex'
+                                #print "expand: " + inputPath
 				if os.path.exists(inputPath):
 					inputFile = open(inputPath, 'r')
 					contents = contents + inputFile.readlines()
@@ -304,98 +316,179 @@ def expand_input(argv):
 	contents = temp
 	return contents
 
+def graceful_kill(input, output):
+	inputHandler  = open(input, 'rU')
+        outputHandler = open(output, "w")
+        contents = []
+        # Expand \input{} files
+        for line in inputHandler:
+                match = re.search(r"(.*)\\input{[./]*(.*?)}(.*)", line)
+                if match:
+                        contents.append(match.group(1))
+                        if re.search(r"%", match.group(1)):
+                                pass
+                        else:
+                                inputPath = os.getcwd() + '/' + cut_extension(match.group(2),'.tex') + '.tex'
+                                if os.path.exists(inputPath):
+                                        inputFile = open(inputPath, 'r')
+                                        contents = contents + inputFile.readlines()
+                                        contents.append('\n')
+                                contents.append(match.group(3))
+                else:
+                        contents.append(line)
+        inputHandler.close()
+        for line in contents:
+                outputHandler.write(line)
+        outputHandler.close()
+
+def demacro(input, output, verbose):
+
+        KILL_TIME_SEC   = 30
+        start_time      = time.time()
+
+        contents      = expand_input(input)
+        outputHandler = open(output, "w")
+
+        macroDict = {}
+        multilineFlag = False
+
+        for line in contents:
+
+                #print "line = {} ".format(line)
+                #print "multi = {} ".format(multilineFlag)
+
+                if re.search(r"^%",line):
+                        outputHandler.write(line)
+                        continue
+
+                if multilineFlag:
+                        current = re.search(r"^([^%\n]*)",current).group() + ' ' + line
+                        multilineFlag = False
+                else:
+                        current = line
+
+                #print "current = {}".format(current)
+
+                candidate = set(re.findall(r"\\(\W|[A-Za-z0-9]+)", current))
+                for x in list(set(macroDict) & candidate):
+
+                        if time.time()-start_time > KILL_TIME_SEC:
+                                print "timeout1: {}".format(output)
+                                outputHandler.close()
+                                graceful_kill(input, output)
+                                return
+
+                        if verbose:
+                                print 'Demacro  -----------'
+                                print x
+                                print macroDict[x].definition
+                                print macroDict[x].narg
+                                print macroDict[x].default
+                                print '-----------'
+
+                        currentParsed = macroDict[x].parse(current)
+
+                        if macroDict[x].kill_me:
+                                print "timeout2: {}".format(output)
+                                outputHandler.close()
+                                graceful_kill(input, output)
+                                return
+
+                        multilineFlag = currentParsed[1]
+
+                        if multilineFlag:
+                                break
+
+                        current = currentParsed[0]
+                        if verbose:
+                                print "parsed: {}, multiline: {}".format(current, multilineFlag)
+                if multilineFlag:
+                        continue
+
+                newmacro = macro(current)
+                multilineFlag = newmacro.multiline
+                if multilineFlag:
+                        #print "multiline2: {}".format(multilineFlag)
+                        continue
+                elif newmacro.defined:
+                        macroDict[newmacro.name] = newmacro
+                        if verbose:
+                                print 'New Macro -----------'
+                                print current
+                                print newmacro.name
+                                print newmacro.definition
+                                print newmacro.narg
+                                print '-----------'
+
+                else:
+                        #print "writing now = {}".format(current)
+                        outputHandler.write(current)
+
+        outputHandler.close()
+        return
+
+def gunzip_and_demacro((tarball, outDir, verbose)):
+
+        # extract files from tarball
+        #print "extracting" + tarball
+        tar = tarfile.open(tarball)
+        tar.extractall(outDir)
+
+        # find main file
+        inputFile = 'None'
+        for file in filter(lambda x: '.tex' in x, tar.getnames()):
+                fh = open(file, 'r')
+                for line in fh:
+                        ## TODO: ignore commented lines
+                        if re.search('begin{document}', line):
+                                inputFile = file
+                                fh.close()
+                                break
+                fh.close()
+
+        if inputFile == 'None':
+                print 'no main file found for ' + tarball
+                tar.close()
+                return
+
+        tar.close()
+        outputFile = tarball.replace('.tar.gz', '') + '.tex'
+        
+        #print "input = {}, output = {}".format(inputFile, outputFile)
+        
+        # change current directory so rest of code works (fix?)
+        os.chdir(os.path.dirname(os.path.realpath(inputFile)))
+        demacro(os.path.basename(inputFile), outputFile, verbose)
+        os.chdir(os.path.dirname(os.path.realpath(outputFile)))
+        return
+        
+
 def main():
 
-	contents = expand_input(sys.argv[1])
+        parser   = argparse.ArgumentParser(description='expands LaTeX macros')
 
-	outputHandler = open(sys.argv[2], "w")
-	macroDict = {}
-	multilineFlag = False
+        # required
+        parser.add_argument('inputName',  help='input file or directory')
+        parser.add_argument('outputName', help='output file or directory')
 
-	for line in contents:
+        # optional
+        parser.add_argument('-d', '--directory', action='store_true', help='indicates that inputFile is a directory of tarballs and outputFile is a directory')
+        parser.add_argument('-v', '--verbose' , action='store_true', help='enable verbose mode')
 
-		#print line
-		#print multilineFlag
+        args     = parser.parse_args()
+        
 
-		if re.search(r"^%",line):
-			outputHandler.write(line)
-			continue
+        # assume directory has tarballs
+        if args.directory:
+                tarballs = glob.glob(args.inputName + '/*.tar.gz')
+                pool     = multiprocessing.Pool(processes=4)
+                pool.map(gunzip_and_demacro, zip(tarballs, repeat(args.outputName), repeat(args.verbose)))
+        else:
+                demacro(args.inputName, args.outputName, args.verbose)
 
-		if multilineFlag:
-			current = re.search(r"^([^%\n]*)",current).group() + ' ' + line
-			multilineFlag = False
-		else:
-			current = line
-
-		#print current
-
-		candidate = set(re.findall(r"\\(\W|[A-Za-z0-9]+)", current))
-		for x in list(set(macroDict) & candidate):
-			#print x
-			#print macroDict[x].definition
-			#print macroDict[x].narg
-			#print macroDict[x].default
-			currentParsed = macroDict[x].parse(current)
-			multilineFlag = currentParsed[1]
-			if multilineFlag:
-				break
-			current = currentParsed[0]
-		if multilineFlag:
-			continue
-
-		newmacro = macro(current)
-		multilineFlag = newmacro.multiline
-		if multilineFlag:
-			continue
-		elif newmacro.defined:
-			macroDict[newmacro.name] = newmacro
-			print current
-			print newmacro.name
-			print newmacro.definition
-			print newmacro.narg
-		else:
-			outputHandler.write(current)
-
-	outputHandler.close()
-
+        return
 
 if __name__ == "__main__":
+	main()
 
-	# main()
-	# Start main as a process
-	p = multiprocessing.Process(target=main)
-	p.start()
 
-	# Wait for 300 seconds or until process finishes
-	killTime = 300
-	p.join(killTime)
-
-	# If thread is still active
-	if p.is_alive():
-		print "Killing process after %d seconds\nOutput file as it is" %killTime
-		# Terminate
-		p.terminate()
-		p.join()
-		inputHandler = open(sys.argv[1], 'rU')
-		outputHandler = open(sys.argv[2], "w")
-		contents = []
-		# Expand \input{} files
-		for line in inputHandler:
-			match = re.search(r"(.*)\\input{[./]*(.*?)}(.*)", line)
-			if match:
-				contents.append(match.group(1))
-				if re.search(r"%", match.group(1)):
-					pass
-				else:
-					inputPath = os.getcwd() + '/' + cut_extension(match.group(2),'.tex') + '.tex'
-					if os.path.exists(inputPath):
-						inputFile = open(inputPath, 'r')
-						contents = contents + inputFile.readlines()
-						contents.append('\n')
-					contents.append(match.group(3))
-			else:
-				contents.append(line)
-		inputHandler.close()
-		for line in contents:
-			outputHandler.write(line)
-		outputHandler.close()
