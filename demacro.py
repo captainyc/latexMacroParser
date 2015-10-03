@@ -230,6 +230,7 @@ class macro:
 
 def expand_input(argv):
     inputHandler = open(argv, 'rU')
+    basedir      = os.path.dirname(argv)
     contents = []
     for line in inputHandler:
         match = re.search(r"(.*)\\input{[./]*(.*?)}(.*)", line)
@@ -238,7 +239,7 @@ def expand_input(argv):
             if re.search(r"%", match.group(1)):
                 pass
             else:
-                inputPath = os.getcwd() + '/' + cut_extension(match.group(2),'.tex') + '.tex'
+                inputPath = basedir + '/' + cut_extension(match.group(2),'.tex') + '.tex'
                 #print "expand: " + inputPath
                 if os.path.exists(inputPath):
                     inputFile = open(inputPath, 'r')
@@ -266,6 +267,7 @@ def expand_input(argv):
 
 def graceful_kill(input, output):
     inputHandler  = open(input, 'rU')
+    basedir       = os.path.dirname(input)
     outputHandler = open(output, "w")
     contents = []
     # Expand \input{} files
@@ -276,7 +278,7 @@ def graceful_kill(input, output):
             if re.search(r"%", match.group(1)):
                 pass
             else:
-                inputPath = os.getcwd() + '/' + cut_extension(match.group(2),'.tex') + '.tex'
+                inputPath = basedir + '/' + cut_extension(match.group(2),'.tex') + '.tex'
                 if os.path.exists(inputPath):
                     inputFile = open(inputPath, 'r')
                     contents = contents + inputFile.readlines()
