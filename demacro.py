@@ -21,6 +21,7 @@ import glob
 import tarfile
 from itertools import repeat
 import time
+import shutil
 
 def cut_extension(filename, ext):
     file = filename
@@ -374,21 +375,23 @@ def demacro(input, output, verbose):
     outputHandler.close()
     return
 
-def gunzip_and_demacro((tarball, outDir, verbose)):
+def gunzip_and_demacro((tarball, outDir, verbose, keep)):
 
     # extract files from tarball
-    #print "extracting" + tarball
-    tar = tarfile.open(tarball)
+    if verbose:
+      print "extracting " + tarball
+
+    tar      = tarfile.open(tarball)
     tar.extractall(outDir)
 
     # find main file
     inputFile = 'None'
     for file in filter(lambda x: '.tex' in x, tar.getnames()):
-        fh = open(file, 'r')
+        fh = open(os.path.join(outDir,file), 'r')
         for line in fh:
             ## TODO: ignore commented lines
             if re.search('begin{document}', line):
-                inputFile = file
+                inputFile = os.path.join(outDir, file)
                 fh.close()
                 break
         fh.close()
@@ -399,14 +402,15 @@ def gunzip_and_demacro((tarball, outDir, verbose)):
         return
 
     tar.close()
-    outputFile = tarball.replace('.tar.gz', '') + '.tex'
-    
+
+    fileBase   = os.path.basename(tarball.replace('.tar.gz', '') + '.tex')
+    outputFile = os.path.join(outDir, fileBase)
+
     #print "input = {}, output = {}".format(inputFile, outputFile)
-    
-    # change current directory so rest of code works (fix?)
-    os.chdir(os.path.dirname(os.path.realpath(inputFile)))
-    demacro(os.path.basename(inputFile), outputFile, verbose)
-    os.chdir(os.path.dirname(os.path.realpath(outputFile)))
+
+    demacro(inputFile, outputFile, verbose)
+    if not keep:
+      shutil.rmtree(os.path.dirname(inputFile))
     return
         
 
@@ -421,6 +425,7 @@ def main():
     # optional
     parser.add_argument('-d', '--directory', action='store_true', help='indicates that inputFile is a directory of tarballs and outputFile is a directory')
     parser.add_argument('-v', '--verbose' , action='store_true', help='enable verbose mode')
+    parser.add_argument('-k', '--keep' , action='store_true', help='keep untarred directories in output directory')
 
     args     = parser.parse_args()
     
@@ -429,7 +434,7 @@ def main():
     if args.directory:
         tarballs = glob.glob(args.inputName + '/*.tar.gz')
         pool     = multiprocessing.Pool(processes=4)
-        pool.map(gunzip_and_demacro, zip(tarballs, repeat(args.outputName), repeat(args.verbose)))
+        pool.map(gunzip_and_demacro, zip(tarballs, repeat(args.outputName), repeat(args.verbose), repeat(args.keep)))
     else:
         demacro(args.inputName, args.outputName, args.verbose)
 
